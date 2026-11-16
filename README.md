@@ -10,7 +10,7 @@
 
 ## What a dotfiles repository looks like
 
-`dots init` creates this layout (every path can be changed in `dots.toml`):
+A git repository; `dots init` creates this layout (every path can be changed in `dots.toml`):
 
 ```
 ~/dotfiles/
@@ -35,56 +35,35 @@ This puts `dots` in `~/.local/bin`. If that is not on your `PATH` yet, use `~/.l
 
 ## Getting started
 
-### I have no dotfiles yet
+### Starting from scratch
 
 ```sh
-dots init                  # creates ~/dotfiles (asks first) with the files above
-dots install               # installs Homebrew and mise
-dots add --cask ghostty    # add GUI apps ...
-dots add --mise ripgrep    # ... and CLI tools
+dots init        # creates ~/dotfiles as a new git repository (asks first)
+dots install     # installs Homebrew and mise
 ```
 
-Get some ready-made commands for committing and pushing the repository (each one is shown before it is added):
+Then add apps and tools ([Everyday use](#everyday-use)) and put your config files in the repository ([Keep a config file in the repository](#keep-a-config-file-in-the-repository)).
 
-```sh
-dots pick git@github.com:gari8/dotfiles-cli.git//examples/dots.toml   # list them
-dots pick git@github.com:gari8/dotfiles-cli.git//examples/dots.toml status commit push sync
-```
+### Setting up a new machine
 
-To keep a config file in the repository, move it there, add a line under the `[links]` table that `dots init` put in `dots.toml`, then run `dots install`:
-
-```sh
-mkdir -p ~/dotfiles/zsh && mv ~/.zshrc ~/dotfiles/zsh/.zshrc
-```
-
-```toml
-[links]
-"zsh/.zshrc" = "~/.zshrc"   # file in the repository = link target
-```
-
-Finally commit `~/dotfiles` and push it to a repository of your own (`dots cmd commit <message>`, then `dots cmd push` if you picked them).
-
-### I have a dotfiles repository made with dots (a new machine)
+Your dotfiles repository already uses dots:
 
 ```sh
 dots init --from git@github.com:you/dotfiles.git   # clones it to ~/dotfiles
-dots install                                        # links, Homebrew, mise
+dots install
 ```
 
-`dots install -n` shows what would happen first.
+### Moving existing dotfiles to dots
 
-### I have dotfiles, but not made with dots
-
-Clone your repository to `~/dotfiles` (or pass its directory to `dots init`) and point `dots` at the files you already have:
+Clone your repository to `~/dotfiles`, then point dots at the files you already have:
 
 ```sh
 cd ~/dotfiles
 dots init --brewfile-gui ./Brewfile --mise-config ./mise.toml
+dots install
 ```
 
-Paths are relative to the current directory and are saved under `[paths]` in `dots.toml`. One Brewfile for everything works too: give the same file as `--brewfile-cli` and `--brewfile-gui`. Then list the files to link under `[links]` and run `dots install`; anything already at a link target is moved to `~/.dotfiles_backup/<time>/`.
-
-You can also copy a file from any git repository instead: `--brewfile-gui git@github.com:someone/dotfiles.git//brew/gui.Brewfile`.
+`dots install -n` shows what would happen first. See [Use your existing files](#use-your-existing-files) for the details.
 
 ## Everyday use
 
@@ -115,6 +94,81 @@ mise
 ```
 
 Brewfile formulae and their dependencies are checked with `brew vulns` (OSV.dev); mise tools with [grype](https://github.com/anchore/grype), run through `mise exec` (the first run downloads its database). Casks and mas apps are not covered. It exits 1 when anything is found.
+
+## Recipes
+
+### Sync your dotfiles through GitHub
+
+`dots pick` takes ready-made git commands from [examples/dots.toml](examples/dots.toml); each one is shown before it is added (once):
+
+```sh
+dots pick git@github.com:gari8/dotfiles-cli.git//examples/dots.toml status commit push pull sync
+```
+
+Create an empty repository on GitHub and connect it (once):
+
+```sh
+cd ~/dotfiles && git remote add origin git@github.com:you/dotfiles.git
+```
+
+Then, from any directory:
+
+```sh
+dots add --cask arc            # change something
+dots cmd commit add arc        # shows the diff, asks, commits
+dots cmd push                  # shows what will be pushed, asks (sets the upstream the first time)
+```
+
+On your other machines, `dots cmd sync` pulls and runs `dots install`.
+
+### Keep a config file in the repository
+
+Move the file into the repository, add a line under `[links]` in `dots.toml`, then run `dots install`:
+
+```sh
+mkdir -p ~/dotfiles/zsh && mv ~/.zshrc ~/dotfiles/zsh/.zshrc
+```
+
+```toml
+[links]
+"zsh/.zshrc" = "~/.zshrc"   # file in the repository = link target
+```
+
+Anything already at a link target is moved to `~/.dotfiles_backup/<time>/` first.
+
+### Use your existing files
+
+`dots init --brewfile-gui <file>`, `--brewfile-cli <file>` and `--mise-config <file>` make dots use files you already have; the paths are relative to the current directory and are saved under `[paths]` in `dots.toml`. For one Brewfile with everything, give the same file to both Brewfile flags.
+
+### Keep tools up to date and safe
+
+```sh
+dots upgrade -n    # what has a newer version
+dots upgrade       # upgrade after a yes (-x name to leave something out)
+dots scan          # known vulnerabilities, and whether a fixed version is out
+```
+
+### Hold a formula at a version
+
+A Brewfile cannot pin versions. `brew pin <name>` holds it on this machine (`dots upgrade` leaves pinned formulae alone). To get the same version on every machine, keep the formula in your own tap and use it from the CLI Brewfile:
+
+```ruby
+# brew/cli.Brewfile
+tap "you/tap"                  # github.com/you/homebrew-tap
+brew "you/tap/opencascade"
+```
+
+### Share commands with others
+
+Put commands in a repository (split them with `include` if you like); others take what they want with `dots pick <git url>`, after reading each one.
+
+### Start from someone else's apps
+
+```sh
+dots init --brewfile-gui git@github.com:someone/dotfiles.git//brew/gui.Brewfile
+```
+
+copies their GUI Brewfile into yours; edit it, then `dots install`.
 
 ## Custom commands
 
