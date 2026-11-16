@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/BurntSushi/toml"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,24 +40,26 @@ func TestLoadConfig(t *testing.T) {
 
 	// Missing file: defaults.
 	cfg, err := loadConfig(dir)
-	if err != nil || cfg.Version != 1 || cfg.Paths.Brewfile != "Brewfile" {
+	if err != nil || cfg.Version != 1 || cfg.Paths.BrewfileCLI != "brew/cli.Brewfile" {
 		t.Fatalf("missing dots.toml: cfg=%+v err=%v", cfg, err)
 	}
 
 	// No version and partial paths: version 1, other defaults kept.
-	writeFile(t, filepath.Join(dir, configFile), "[paths]\nbrewfile = \"brew/Brewfile\"\n")
+	writeFile(t, filepath.Join(dir, configFile), "[paths]\nbrewfile_gui = \"Brewfile\"\n")
 	cfg, err = loadConfig(dir)
-	if err != nil || cfg.Version != 1 || cfg.Paths.Brewfile != "brew/Brewfile" || cfg.Paths.MiseConfig != "config/mise/config.toml" {
+	if err != nil || cfg.Version != 1 || cfg.Paths.BrewfileGUI != "Brewfile" || cfg.Paths.BrewfileCLI != "brew/cli.Brewfile" || cfg.Paths.MiseConfig != "config/mise/config.toml" {
 		t.Fatalf("partial dots.toml: cfg=%+v err=%v", cfg, err)
 	}
 
 	errorCases := map[string]string{
-		"version = 2\n":                       "upgrade dots",
-		"[cmd.x]\nrun = \"a\"\ndesk = \"\"\n": "unknown keys",
-		"[cmd.add]\nrun = \"a\"\n":            "reserved",
-		"[cmd.x]\ndesc = \"a\"\n":             "no run",
-		"[cmd.x]\nrun = \"a\"\ndir = \"x\"\n": "root or cwd",
-		"[[[":                                 "cannot read",
+		"version = 2\n":                           "upgrade dots",
+		"[cmd.x]\nrun = \"a\"\ndesk = \"\"\n":     "unknown keys",
+		"[cmd.add]\nrun = \"a\"\n":                "reserved",
+		"[cmd.x]\ndesc = \"a\"\n":                 "no run",
+		"[cmd.x]\nrun = \"a\"\ndir = \"x\"\n":     "root or cwd",
+		"[[[":                                     "cannot read",
+		"[paths]\nbrewfile = \"B\"\n":             "brewfile_cli",
+		"[brewfile]\nformula_section = \"CLI\"\n": "brewfile_cli",
 	}
 	for content, want := range errorCases {
 		writeFile(t, filepath.Join(dir, configFile), content)
@@ -119,7 +122,7 @@ func TestInitAndLinks(t *testing.T) {
 	writeFile(t, filepath.Join(home, ".zshrc"), "# old\n") // to be backed up
 
 	// First run creates dots.toml from the template and registers the root.
-	if err := initRepo(root, false); err != nil {
+	if err := initRepo(root, initPaths{}, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, configFile)); err != nil {
@@ -128,8 +131,8 @@ func TestInitAndLinks(t *testing.T) {
 	if got, _ := repoRoot(); got != root {
 		t.Fatalf("root not registered: %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, "Brewfile")); err != nil {
-		t.Error("Brewfile was not created")
+	if _, err := os.Stat(filepath.Join(root, "brew", "gui.Brewfile")); err != nil {
+		t.Error("the GUI Brewfile was not created")
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "config", "mise", "config.toml")); string(b) != "[tools]\n" {
 		t.Errorf("an existing mise config was overwritten: %q", b)
@@ -141,7 +144,7 @@ func TestInitAndLinks(t *testing.T) {
 "config/mise" = "~/.config/mise"
 "missing" = "~/.missing"
 `)
-	if err := initRepo(root, false); err != nil {
+	if err := initRepo(root, initPaths{}, false); err != nil {
 		t.Fatal(err)
 	}
 	for src, to := range map[string]string{"zsh/.zshrc": ".zshrc", "config/mise": ".config/mise"} {
@@ -159,7 +162,7 @@ func TestInitAndLinks(t *testing.T) {
 	}
 
 	// A third run changes nothing.
-	if err := initRepo(root, false); err != nil {
+	if err := initRepo(root, initPaths{}, false); err != nil {
 		t.Fatal(err)
 	}
 	backups, _ = filepath.Glob(filepath.Join(home, ".dotfiles_backup", "*", ".zshrc*"))
@@ -169,10 +172,158 @@ func TestInitAndLinks(t *testing.T) {
 
 	// Dry run changes nothing either.
 	os.Remove(filepath.Join(home, ".zshrc"))
-	if err := initRepo(root, true); err != nil {
+	if err := initRepo(root, initPaths{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".zshrc")); err == nil {
 		t.Error("dry run created a link")
+	}
+}
+
+func TestBrewFix(t *testing.T) {
+	cases := []struct {
+		in    []string
+		want  string
+		fixed bool
+	}{
+		{nil, "no fix yet", false},
+		{[]string{"1.2.3"}, "fixed in 1.2.3", true},
+		{[]string{"0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"}, "patched upstream, not released yet", false},
+		{[]string{"0a1b2c3", "2.0.1"}, "fixed in 2.0.1", true},
+	}
+	for _, c := range cases {
+		if got, fixed := brewFix(c.in); got != c.want || fixed != c.fixed {
+			t.Errorf("brewFix(%v) = %q, %v; want %q, %v", c.in, got, fixed, c.want, c.fixed)
+		}
+	}
+}
+
+func TestSetTOMLKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// replace the existing key, keep comments and other keys
+		{"# top\n[paths]\nbrewfile = \"Brewfile\"  # old\nmise_config = \"m.toml\"\n\n[links]\n",
+			"# top\n[paths]\nbrewfile = \"brew/Brewfile\"\nmise_config = \"m.toml\"\n\n[links]\n"},
+		// add the key to an existing section
+		{"[paths]\nmise_config = \"m.toml\"\n", "[paths]\nbrewfile = \"brew/Brewfile\"\nmise_config = \"m.toml\"\n"},
+		// a key with the same name in another section is not touched
+		{"[other]\nbrewfile = \"x\"\n", "[other]\nbrewfile = \"x\"\n\n[paths]\nbrewfile = \"brew/Brewfile\"\n"},
+	}
+	for _, c := range cases {
+		if got := setTOMLKey(c.in, "paths", "brewfile", "brew/Brewfile"); got != c.want {
+			t.Errorf("setTOMLKey(%q) =\n%q\nwant\n%q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestInitPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("DOTS_ROOT", "")
+	root := filepath.Join(home, "dotfiles")
+	writeFile(t, filepath.Join(root, "mise.toml"), "[tools]\njq = \"latest\"\n")
+	writeFile(t, filepath.Join(home, "Brewfile"), "cask \"ghostty\"\n") // outside the repository
+
+	t.Chdir(root)
+	if err := initRepo(root, initPaths{brewfileGUI: "~/Brewfile", miseConfig: "mise.toml"}, false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Paths.MiseConfig != "mise.toml" || cfg.Paths.BrewfileGUI != filepath.Join(home, "Brewfile") {
+		t.Errorf("paths = %+v", cfg.Paths)
+	}
+	// The existing files are used, not replaced by templates.
+	if _, err := os.Stat(filepath.Join(root, "config", "mise", "config.toml")); err == nil {
+		t.Error("a default mise config was created although --mise-config was given")
+	}
+	if _, err := os.Stat(filepath.Join(root, "brew", "gui.Brewfile")); err == nil {
+		t.Error("a default GUI Brewfile was created although --brewfile-gui was given")
+	}
+}
+
+func TestParseRemote(t *testing.T) {
+	cases := []struct {
+		in   string
+		want remoteSpec
+	}{
+		{"git@github.com:gari8/dotfiles.git//Brewfile", remoteSpec{"git@github.com:gari8/dotfiles.git", "Brewfile", ""}},
+		{"git@github.com:gari8/dotfiles.git", remoteSpec{"git@github.com:gari8/dotfiles.git", "dots.toml", ""}},
+		{"https://github.com/gari8/dotfiles.git//config/mise/config.toml?ref=dev", remoteSpec{"https://github.com/gari8/dotfiles.git", "config/mise/config.toml", "dev"}},
+		{"https://github.com/gari8/dotfiles", remoteSpec{"https://github.com/gari8/dotfiles", "dots.toml", ""}},
+		{"file:///tmp/repo//a/b", remoteSpec{"file:///tmp/repo", "a/b", ""}},
+	}
+	for _, c := range cases {
+		if got := parseRemote(c.in, "dots.toml"); got != c.want {
+			t.Errorf("parseRemote(%q) = %+v, want %+v", c.in, got, c.want)
+		}
+	}
+	for _, s := range []string{"./Brewfile", "Brewfile", "~/x", "/abs/path"} {
+		if isRemote(s) {
+			t.Errorf("isRemote(%q) = true", s)
+		}
+	}
+}
+
+func TestFormatAndRemoveTable(t *testing.T) {
+	c := customCmd{Desc: "Push", Confirm: true, Run: "st=$(git status)\n[ -n \"$st\" ] && echo dirty\ngit push\n"}
+	block := formatCmd("push", c)
+	doc := "version = 1\n\n[cmd.a]\nrun = \"a\"\n\n" + block + "\n\n[cmd.b]\nrun = \"b\"\n"
+
+	// The formatted block parses back to the same command.
+	var parsed struct {
+		Cmd map[string]customCmd `toml:"cmd"`
+	}
+	if _, err := toml.Decode(doc, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Cmd["push"] != c {
+		t.Errorf("round trip: got %+v, want %+v", parsed.Cmd["push"], c)
+	}
+
+	// A line starting with [ inside the script is not taken for a table header.
+	got := removeTable(doc, "cmd.push")
+	if strings.Contains(got, "git push") || !strings.Contains(got, "[cmd.a]") || !strings.Contains(got, "[cmd.b]") {
+		t.Errorf("removeTable:\n%s", got)
+	}
+	if removeTable(doc, "cmd.none") != doc {
+		t.Error("removing a missing table changed the document")
+	}
+}
+
+func TestInclude(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, configFile), "include = [\"cmds/*.toml\"]\n\n[cmd.status]\nrun = \"git status\"\n")
+	writeFile(t, filepath.Join(dir, "cmds", "git.toml"), "[cmd.push]\nrun = \"git push\"\n")
+	writeFile(t, filepath.Join(dir, "cmds", "work.toml"), "[cmd.deploy]\nrun = \"make deploy\"\n")
+
+	cfg, err := loadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Cmd) != 3 || cfg.cmdFrom["push"] != filepath.Join("cmds", "git.toml") || cfg.cmdFrom["status"] != configFile {
+		t.Fatalf("cmd = %v, from = %v", cfg.Cmd, cfg.cmdFrom)
+	}
+
+	errorCases := map[string]string{
+		"[cmd.status]\nrun = \"x\"\n": "defined in both",
+		"[links]\n\"a\" = \"~/a\"\n":  "only [cmd.*]",
+		"[cmd.add]\nrun = \"x\"\n":    "reserved",
+		"[cmd.x]\ndesc = \"x\"\n":     "cmds/bad.toml: cmd.x has no run",
+	}
+	for content, want := range errorCases {
+		writeFile(t, filepath.Join(dir, "cmds", "bad.toml"), content)
+		if _, err := loadConfig(dir); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: got %v, want an error containing %q", content, err, want)
+		}
+	}
+	os.Remove(filepath.Join(dir, "cmds", "bad.toml"))
+
+	// A literal path that does not exist is an error; an empty glob is not.
+	writeFile(t, filepath.Join(dir, configFile), "include = [\"none/*.toml\", \"missing.toml\"]\n")
+	if _, err := loadConfig(dir); err == nil || !strings.Contains(err.Error(), "missing.toml") {
+		t.Errorf("missing include: got %v", err)
 	}
 }

@@ -26,7 +26,7 @@ func newUpgradeCmd() *cobra.Command {
 			}
 			doBrew, doMise := t.all() || t.brew, t.all() || t.mise
 			if doBrew {
-				if err := ready("brew", r.brewfile()); err != nil {
+				if err := ready("brew", r.brewfiles()...); err != nil {
 					return err
 				}
 			}

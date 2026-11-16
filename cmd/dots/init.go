@@ -7,34 +7,63 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 )
 
+// initPaths are the --brewfile-cli / --brewfile-gui / --mise-config values
+// (empty when not given).
+type initPaths struct {
+	brewfileCLI, brewfileGUI, miseConfig string
+}
+
 func newInitCmd() *cobra.Command {
 	var dryRun bool
+	var from string
+	var paths initPaths
 	cmd := &cobra.Command{
 		Use:   "init [<dotfiles dir>]",
 		Short: "Register the dotfiles repository, create missing config files and link files",
 		Long: `Register the dotfiles repository (default: ~/dotfiles) in
-~/.config/dots/config.toml, create dots.toml, the Brewfile and the mise config
-if they are missing, and create the symlinks listed under [links].
-Safe to run again; existing files are backed up.`,
+~/.config/dots/config.toml, create dots.toml, the CLI and GUI Brewfiles and the
+mise config if they are missing, and create the symlinks listed under [links].
+Safe to run again; existing files are backed up.
+
+--from clones a git repository into the directory first (it must not exist).
+
+--brewfile-cli, --brewfile-gui and --mise-config take either
+  a local file (relative to the current directory): recorded under [paths]
+  <git url>//<path>[?ref=<ref>]: copied into this repository (asks before
+                                 replacing an existing file)`,
+		Example: `  dots init --from git@github.com:you/dotfiles.git
+  dots init --brewfile-gui ./Brewfile --mise-config ./mise.toml
+  dots init --brewfile-gui git@github.com:someone/dotfiles.git//brew/gui.Brewfile`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "~/dotfiles"
 			if len(args) == 1 {
 				dir = args[0]
 			}
-			return initRepo(dir, dryRun)
+			if from != "" {
+				if err := cloneRepo(from, dir, dryRun); err != nil || dryRun {
+					return err
+				}
+			}
+			return initRepo(dir, paths, dryRun)
 		},
 	}
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "only show what would be done")
+	cmd.Flags().StringVar(&from, "from", "", "git repository to clone into the directory first")
+	cmd.Flags().StringVar(&paths.brewfileCLI, "brewfile-cli", "", "Brewfile for formulae (sets paths.brewfile_cli)")
+	cmd.Flags().StringVar(&paths.brewfileGUI, "brewfile-gui", "", "Brewfile for casks and mas apps (sets paths.brewfile_gui)")
+	cmd.Flags().StringVar(&paths.miseConfig, "mise-config", "", "mise config to use (sets paths.mise_config)")
 	return cmd
 }
 
-func initRepo(dir string, dryRun bool) error {
+func initRepo(dir string, paths initPaths, dryRun bool) error {
 	dir, err := expandHome(dir)
 	if err != nil {
 		return err
@@ -55,17 +84,40 @@ func initRepo(dir string, dryRun bool) error {
 	}
 
 	// Create dots.toml from the template, or check the existing one.
-	if err := createIfMissing(filepath.Join(root, configFile), configTemplate, dryRun); err != nil {
+	cfgPath := filepath.Join(root, configFile)
+	if err := createIfMissing(cfgPath, configTemplate, dryRun); err != nil {
 		return err
 	}
 	cfg, err := loadConfig(root)
 	if err != nil {
 		return err
 	}
+	// Local files are recorded under [paths]; remote ones are copied in below.
+	local, remote := splitPaths(paths)
+	if err := setPaths(root, cfgPath, &cfg, local, dryRun); err != nil {
+		return err
+	}
 
 	// GUI apps come from Homebrew and CLI tools from mise, so both files are needed.
 	r := &repo{root: root, cfg: cfg}
-	if err := createIfMissing(r.brewfile(), brewfileTemplate(cfg.Brewfile), dryRun); err != nil {
+	defaults := defaultConfig().Paths
+	imports := []struct{ value, defaultPath, dest string }{
+		{remote.brewfileCLI, defaults.BrewfileCLI, r.brewfileFor(formula)},
+		{remote.brewfileGUI, defaults.BrewfileGUI, r.brewfileFor(cask)},
+		{remote.miseConfig, defaults.MiseConfig, r.miseConfig()},
+	}
+	for _, im := range imports {
+		if im.value == "" {
+			continue
+		}
+		if err := importFile(parseRemote(im.value, im.defaultPath), im.dest, dryRun); err != nil {
+			return err
+		}
+	}
+	if err := createIfMissing(r.brewfileFor(formula), brewfileCLITemplate, dryRun); err != nil {
+		return err
+	}
+	if err := createIfMissing(r.brewfileFor(cask), brewfileGUITemplate, dryRun); err != nil {
 		return err
 	}
 	if err := createIfMissing(r.miseConfig(), miseTemplate, dryRun); err != nil {
@@ -73,6 +125,142 @@ func initRepo(dir string, dryRun bool) error {
 	}
 
 	return applyLinks(root, cfg.Links, dryRun)
+}
+
+// cloneRepo clones repo into dir, which must not exist or be empty.
+func cloneRepo(repo, dir string, dryRun bool) error {
+	dir, err := expandHome(dir)
+	if err != nil {
+		return err
+	}
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		return fmt.Errorf("%s already exists; drop --from, or give another directory", tildePath(dir))
+	}
+	fmt.Printf("  clone   %s -> %s\n", repo, tildePath(dir))
+	if dryRun {
+		fmt.Println("(dry run: stopping here, the rest needs the clone)")
+		return nil
+	}
+	return gitClone(repo, "", dir, false)
+}
+
+// splitPaths separates local paths from <git url>//<path> values.
+func splitPaths(p initPaths) (local, remote initPaths) {
+	split := func(v string, l, r *string) {
+		if isRemote(v) {
+			*r = v
+		} else {
+			*l = v
+		}
+	}
+	split(p.brewfileCLI, &local.brewfileCLI, &remote.brewfileCLI)
+	split(p.brewfileGUI, &local.brewfileGUI, &remote.brewfileGUI)
+	split(p.miseConfig, &local.miseConfig, &remote.miseConfig)
+	return local, remote
+}
+
+// importFile copies a file from a git repository to dest, asking before
+// replacing an existing file.
+func importFile(spec remoteSpec, dest string, dryRun bool) error {
+	fmt.Printf("  copy    %s -> %s\n", spec, tildePath(dest))
+	if dryRun {
+		return nil
+	}
+	content, err := fetchRemote(spec)
+	if err != nil {
+		return err
+	}
+	if exists(dest) && !confirm(fmt.Sprintf("Replace %s?", tildePath(dest))) {
+		fmt.Printf("  keep    %s\n", tildePath(dest))
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dest, content, 0o644)
+}
+
+// setPaths records --brewfile-cli / --brewfile-gui / --mise-config under [paths] in dots.toml and
+// in cfg. Paths inside the repository are stored relative to it.
+func setPaths(root, cfgPath string, cfg *repoConfig, paths initPaths, dryRun bool) error {
+	sets := []struct {
+		key, value string
+		field      *string
+	}{
+		{"brewfile_cli", paths.brewfileCLI, &cfg.Paths.BrewfileCLI},
+		{"brewfile_gui", paths.brewfileGUI, &cfg.Paths.BrewfileGUI},
+		{"mise_config", paths.miseConfig, &cfg.Paths.MiseConfig},
+	}
+	for _, s := range sets {
+		if s.value == "" {
+			continue
+		}
+		value, err := repoRelative(root, s.value)
+		if err != nil {
+			return err
+		}
+		*s.field = value
+		fmt.Printf("  set     paths.%s = %q\n", s.key, value)
+		if dryRun {
+			continue
+		}
+		content, err := os.ReadFile(cfgPath)
+		if err != nil {
+			return err
+		}
+		updated := setTOMLKey(string(content), "paths", s.key, value)
+		if err := os.WriteFile(cfgPath, []byte(updated), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// repoRelative resolves path (relative to the current directory, ~ allowed)
+// and returns it relative to root when it is inside root, else absolute.
+func repoRelative(root, path string) (string, error) {
+	path, err := expandHome(path)
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if rel, err := filepath.Rel(root, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel, nil
+	}
+	return abs, nil
+}
+
+// setTOMLKey sets key = "value" in [section], keeping every other line and
+// comment as it is. The key is added after the section header when missing,
+// and the section is appended when it does not exist.
+func setTOMLKey(content, section, key, value string) string {
+	line := fmt.Sprintf("%s = %q", key, value)
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	keyLine := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(key) + `\s*=`)
+
+	start := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "["+section+"]" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return strings.Join(lines, "\n") + "\n\n[" + section + "]\n" + line + "\n"
+	}
+	for i := start + 1; i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "["); i++ {
+		if keyLine.MatchString(lines[i]) {
+			lines[i] = line
+			return strings.Join(lines, "\n") + "\n"
+		}
+	}
+	out := append([]string{}, lines[:start+1]...)
+	out = append(out, line)
+	out = append(out, lines[start+1:]...)
+	return strings.Join(out, "\n") + "\n"
 }
 
 // createIfMissing writes content to path unless the file already exists.
@@ -90,16 +278,15 @@ func createIfMissing(path, content string, dryRun bool) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// brewfileTemplate has the sections that dots add puts new entries under.
-func brewfileTemplate(cfg brewfileConfig) string {
-	return fmt.Sprintf(`# Homebrew: GUI apps (cask) and system tools that mise does not provide (brew).
-# Edited by dots add --brew / --cask, applied by dots install.
-
-# --- %s ---
-
-# --- %s ---
-`, cfg.FormulaSection, cfg.CaskSection)
-}
+// The Brewfiles that dots init creates.
+const (
+	brewfileCLITemplate = `# Homebrew formulae: system tools and libraries that mise does not provide.
+# Edited by dots add --brew, applied by dots install.
+`
+	brewfileGUITemplate = `# Homebrew casks and Mac App Store apps (mas "Name", id: 123).
+# Edited by dots add --cask, applied by dots install.
+`
+)
 
 // miseTemplate is the mise config that dots init creates.
 const miseTemplate = `# mise: CLI tools and language runtimes.
@@ -149,16 +336,12 @@ func registerRoot(root string, dryRun bool) error {
 const configTemplate = `# dots configuration (https://github.com/gari8/dotfiles-cli)
 version = 1
 
-# Paths relative to this repository.
+# Paths relative to this repository. GUI apps come from Homebrew and CLI tools
+# from mise; the CLI Brewfile is for what mise does not provide.
 [paths]
-brewfile = "Brewfile"
+brewfile_cli = "brew/cli.Brewfile"   # formulae (dots add --brew)
+brewfile_gui = "brew/gui.Brewfile"   # casks and mas apps (dots add --cask)
 mise_config = "config/mise/config.toml"
-
-# dots add puts new Brewfile entries at the end of the section whose heading
-# ("# --- ... ---") contains this text; without a match they go at the end.
-[brewfile]
-formula_section = "CLI"
-cask_section = "GUI"
 
 # Symlinks created by dots init / dots install: "file in this repository" = "link target".
 [links]

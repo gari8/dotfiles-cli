@@ -41,8 +41,10 @@ func main() {
 		newRmCmd(),
 		newListCmd(),
 		newUpgradeCmd(),
+		newScanCmd(),
 		newPathCmd(),
 		newCmdCmd(),
+		newPickCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

@@ -18,12 +18,12 @@ func newInstallCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Set up this machine: links, Homebrew + Brewfile, mise tools",
+		Short: "Set up this machine: links, Homebrew + Brewfiles, mise tools",
 		Long: `Set up this machine from the dotfiles repository. GUI apps come from
 Homebrew and CLI tools from mise, so both are required:
 
   1. create the symlinks under [links]
-  2. install Homebrew if missing (after asking), then brew bundle the Brewfile
+  2. install Homebrew if missing (after asking), then brew bundle the Brewfiles
   3. install mise with Homebrew if missing, then mise install
 
 Safe to run again.`,
@@ -69,18 +69,15 @@ func install(r *repo, dryRun bool) error {
 }
 
 func installBrew(r *repo, dryRun bool) error {
-	brewfile := r.brewfile()
-	if !exists(brewfile) {
-		return fmt.Errorf("Brewfile not found: %s (dots init creates one)", tildePath(brewfile))
+	files := r.brewfiles()
+	for _, f := range files {
+		if !exists(f) {
+			return fmt.Errorf("Brewfile not found: %s (dots init creates one)", tildePath(f))
+		}
 	}
 
 	brew := findBrew()
-	if brew == "" {
-		if dryRun {
-			fmt.Println("  install Homebrew (asks first)")
-			fmt.Printf("  run     brew bundle install --no-upgrade --file=%s\n", tildePath(brewfile))
-			return nil
-		}
+	if brew == "" && !dryRun {
 		if !confirm("Homebrew is not installed. Install it?") {
 			return errors.New("dots needs Homebrew for GUI apps; install canceled")
 		}
@@ -91,15 +88,24 @@ func installBrew(r *repo, dryRun bool) error {
 			return errors.New("Homebrew was installed but brew was not found")
 		}
 	}
-	// Make brew and what it installs (mise, for one) visible to later steps.
-	prependPath(filepath.Dir(brew))
+	if brew == "" {
+		fmt.Println("  install Homebrew (asks first)")
+	} else {
+		// Make brew and what it installs (mise, for one) visible to later steps.
+		prependPath(filepath.Dir(brew))
+	}
 
 	// Only install what is missing; upgrades are left to dots upgrade, which asks first.
-	if dryRun {
-		fmt.Printf("  run     brew bundle install --no-upgrade --file=%s\n", tildePath(brewfile))
-		return nil
+	for _, f := range files {
+		fmt.Printf("  run     brew bundle install --no-upgrade --file=%s\n", tildePath(f))
+		if dryRun {
+			continue
+		}
+		if err := run(r.root, brew, "bundle", "install", "--no-upgrade", "--file="+f); err != nil {
+			return err
+		}
 	}
-	return run(r.root, brew, "bundle", "install", "--no-upgrade", "--file="+brewfile)
+	return nil
 }
 
 func installMise(r *repo, dryRun bool) error {

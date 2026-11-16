@@ -107,12 +107,16 @@ var (
 )
 
 func listBrew(w *tabwriter.Writer, r *repo) error {
-	if err := ready("brew", r.brewfile()); err != nil {
+	if err := ready("brew", r.brewfiles()...); err != nil {
 		return err
 	}
-	lines, err := readLines(r.brewfile())
-	if err != nil {
-		return err
+	var lines []string
+	for _, file := range r.brewfiles() {
+		l, err := readLines(file)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, l...)
 	}
 	formulae := installedSet(r.root, 0, "brew", "list", "--formula", "-1")
 	casks := installedSet(r.root, 0, "brew", "list", "--cask", "-1")
@@ -131,7 +135,7 @@ func listBrew(w *tabwriter.Writer, r *repo) error {
 			groups["mas"] = append(groups["mas"], listItem{name: m[1], note: m[3], installed: apps[m[2]]})
 		}
 	}
-	// Formulae, casks and mas apps are all installed from the Brewfile by
+	// Formulae, casks and mas apps are all installed from the Brewfiles by
 	// brew bundle, so they are grouped under brew.
 	fmt.Fprintln(w, "brew")
 	printGroup(w, "  ", "formula", groups["brew"])
@@ -140,11 +144,13 @@ func listBrew(w *tabwriter.Writer, r *repo) error {
 	return nil
 }
 
-// ready checks that a manager (brew / mise) is installed and its config file
-// exists; both are required.
-func ready(tool, config string) error {
-	if !exists(config) {
-		return fmt.Errorf("not found: %s (dots init creates it)", tildePath(config))
+// ready checks that a manager (brew / mise) is installed and its config
+// files exist; both are required.
+func ready(tool string, configs ...string) error {
+	for _, c := range configs {
+		if !exists(c) {
+			return fmt.Errorf("not found: %s (dots init creates it)", tildePath(c))
+		}
 	}
 	return requireTool(tool)
 }
