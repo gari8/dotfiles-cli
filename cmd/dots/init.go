@@ -39,9 +39,10 @@ Safe to run again; existing files are backed up.
   a local file (relative to the current directory): recorded under [paths]
   <git url>//<path>[?ref=<ref>]: copied into this repository (asks before
                                  replacing an existing file)`,
-		Example: `  dots init --from git@github.com:you/dotfiles.git
+		Example: `  dots init --from https://github.com/you/dotfiles.git   # no login needed for a public repository
+  dots init --from git@github.com:you/dotfiles.git       # with an SSH key added to GitHub
   dots init --brewfile-gui ./Brewfile --mise-config ./mise.toml
-  dots init --brewfile-gui git@github.com:someone/dotfiles.git//brew/gui.Brewfile`,
+  dots init --brewfile-gui https://github.com/someone/dotfiles.git//brew/gui.Brewfile`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "~/dotfiles"

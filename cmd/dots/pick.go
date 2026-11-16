@@ -23,8 +23,9 @@ Without names, the commands in <source> are listed.
 
 Custom commands run as shell scripts on your machine, so each one is shown in
 full and needs a yes; -y does not skip this.`,
-		Example: `  dots pick git@github.com:gari8/dotfiles.git
-  dots pick git@github.com:gari8/dotfiles.git push commit`,
+		Example: `  dots pick https://github.com/gari8/dotfiles-cli.git//examples/dots.toml       # list them
+  dots pick https://github.com/gari8/dotfiles-cli.git//examples/dots.toml push  # add one
+  dots pick git@github.com:you/dotfiles.git commit                             # SSH works too`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := openRepo()

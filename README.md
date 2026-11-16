@@ -49,9 +49,12 @@ Then add apps and tools ([Everyday use](#everyday-use)) and put your config file
 Your dotfiles repository already uses dots:
 
 ```sh
-dots init --from git@github.com:you/dotfiles.git   # clones it to ~/dotfiles
+dots init --from https://github.com/you/dotfiles.git   # clones it to ~/dotfiles
+                                                       # (git@github.com:you/dotfiles.git once you have an SSH key)
 dots install
 ```
+
+A fresh machine has no SSH key yet, so use the HTTPS URL: a public repository needs no login. For a private one, set up GitHub access first (an SSH key added to GitHub, or `gh auth login`).
 
 ### Moving existing dotfiles to dots
 
@@ -102,7 +105,8 @@ Brewfile formulae and their dependencies are checked with `brew vulns` (OSV.dev)
 `dots pick` takes ready-made git commands from [examples/dots.toml](examples/dots.toml); each one is shown before it is added (once):
 
 ```sh
-dots pick git@github.com:gari8/dotfiles-cli.git//examples/dots.toml status commit push pull sync
+dots pick https://github.com/gari8/dotfiles-cli.git//examples/dots.toml status commit push pull sync
+# any git URL works, e.g. git@github.com:gari8/dotfiles-cli.git//examples/dots.toml
 ```
 
 Create an empty repository on GitHub and connect it (once):
@@ -110,6 +114,8 @@ Create an empty repository on GitHub and connect it (once):
 ```sh
 cd ~/dotfiles && git remote add origin git@github.com:you/dotfiles.git
 ```
+
+Pushing needs GitHub access: an SSH key added to GitHub for a `git@github.com:` URL, or `gh auth login` for an `https://` one.
 
 Then, from any directory:
 
@@ -165,7 +171,7 @@ Put commands in a repository (split them with `include` if you like); others tak
 ### Start from someone else's apps
 
 ```sh
-dots init --brewfile-gui git@github.com:someone/dotfiles.git//brew/gui.Brewfile
+dots init --brewfile-gui https://github.com/someone/dotfiles.git//brew/gui.Brewfile
 ```
 
 copies their GUI Brewfile into yours; edit it, then `dots install`.
