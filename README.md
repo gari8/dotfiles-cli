@@ -72,4 +72,4 @@ In custom commands, `$DOTS_ROOT` is the repository and `$DOTS_PWD` is where `dot
 
 ## Release
 
-Push a `v*` tag; GitHub Actions runs goreleaser.
+Bump `version` in `version.toml` and push to `main`. GitHub Actions tags `v<version>` and runs goreleaser (nothing happens if the tag already exists). Pushing a `v*` tag by hand also releases.

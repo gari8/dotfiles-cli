@@ -30,6 +30,7 @@ release:
   github:
     owner: gari8
     name: dotfiles-cli
+  prerelease: auto # versions like 1.2.0-rc.1 become GitHub pre-releases
 
 checksum:
   name_template: checksums.txt
