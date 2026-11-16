@@ -157,10 +157,27 @@ func (v scanVuln) pkgLabel() string {
 	case n == 0:
 		return v.pkg
 	case n <= 2:
-		return v.pkg + " " + strings.Join(v.versions, ", ")
+		short := make([]string, n)
+		for i, ver := range v.versions {
+			short[i] = shortVersion(ver)
+		}
+		return v.pkg + " " + strings.Join(short, ", ")
 	default:
-		return fmt.Sprintf("%s %s … %s (%d versions)", v.pkg, v.versions[0], v.versions[n-1], n)
+		return fmt.Sprintf("%s %s … %s (%d versions)", v.pkg, shortVersion(v.versions[0]), shortVersion(v.versions[n-1]), n)
 	}
+}
+
+// pseudoVersion matches a Go pseudo-version such as
+// v0.55.1-0.20260731170536-c1d18010be90 (an untagged commit).
+var pseudoVersion = regexp.MustCompile(`^(v?\d+\.\d+\.\d+)-.*?(\d{4})(\d{2})(\d{2})\d{6}-[0-9a-f]{12}$`)
+
+// shortVersion turns a pseudo-version into "v0.55.1 (dev 2026-07-31)".
+func shortVersion(v string) string {
+	m := pseudoVersion.FindStringSubmatch(v)
+	if m == nil {
+		return v
+	}
+	return fmt.Sprintf("%s (dev %s-%s-%s)", m[1], m[2], m[3], m[4])
 }
 
 func printScan(groups []scanGroup) int {
@@ -198,7 +215,19 @@ func printScan(groups []scanGroup) int {
 				if shared {
 					todo = ""
 				}
-				fmt.Fprintf(w, "    %s\t%s\t%s\t%s\t%s\n", strings.ToUpper(v.severity), v.id, v.pkgLabel(), v.fix, todo)
+				// Leave out empty cells and end the row without a tab, so
+				// rows are not padded past the terminal width.
+				cells := []string{strings.ToUpper(v.severity), v.id}
+				if l := v.pkgLabel(); l != "" {
+					cells = append(cells, l)
+				}
+				cells = append(cells, v.fix)
+				// In a tool with per-row actions, keep the action column aligned
+				// across rows that have none.
+				if todo != "" || (!shared && len(todos) > 1) {
+					cells = append(cells, todo)
+				}
+				fmt.Fprintf(w, "    %s\n", strings.Join(cells, "\t"))
 			}
 		}
 		for _, n := range g.notes {
@@ -397,7 +426,11 @@ func grypeScan(r *repo, dir string) ([]scanVuln, error) {
 			seen[key] = true
 		}
 		if v.Fix.State == "fixed" && len(v.Fix.Versions) > 0 {
-			sv.fix, sv.fixed = "fixed in "+strings.Join(v.Fix.Versions, ", "), true
+			fixes := make([]string, len(v.Fix.Versions))
+			for i, f := range v.Fix.Versions {
+				fixes[i] = shortVersion(f)
+			}
+			sv.fix, sv.fixed = "fixed in "+strings.Join(fixes, ", "), true
 		} else {
 			sv.fix = "no fix yet"
 		}

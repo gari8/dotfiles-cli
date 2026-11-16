@@ -517,3 +517,19 @@ func TestReleaseArchive(t *testing.T) {
 		t.Errorf("extractDots = %q, %v", bin, err)
 	}
 }
+
+func TestShortVersion(t *testing.T) {
+	cases := map[string]string{
+		"v0.55.1-0.20260731170536-c1d18010be90":     "v0.55.1 (dev 2026-07-31)",
+		"0.58.1-0.20261009181718-2f1f834330b2":      "0.58.1 (dev 2026-10-09)",
+		"v0.0.0-20260101120000-abcdefabcdef":        "v0.0.0 (dev 2026-01-01)",
+		"v1.2.3-rc.1.0.20260202030405-0123456789ab": "v1.2.3 (dev 2026-02-02)",
+		"v0.57.0":  "v0.57.0",
+		"go1.27.3": "go1.27.3",
+	}
+	for in, want := range cases {
+		if got := shortVersion(in); got != want {
+			t.Errorf("shortVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
