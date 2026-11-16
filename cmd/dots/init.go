@@ -27,7 +27,8 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init [<dotfiles dir>]",
 		Short: "Register the dotfiles repository, create missing config files and link files",
-		Long: `Register the dotfiles repository (default: ~/dotfiles) in
+		Long: `Register the dotfiles repository (default: ~/dotfiles; created as a new git
+repository after asking if it does not exist) in
 ~/.config/dots/config.toml, create dots.toml, the CLI and GUI Brewfiles and the
 mise config if they are missing, and create the symlinks listed under [links].
 Safe to run again; existing files are backed up.
@@ -72,11 +73,16 @@ func initRepo(dir string, paths initPaths, dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
-		return fmt.Errorf("not a directory: %s (clone your dotfiles there, or pass the path)", tildePath(root))
-	}
 	if dryRun {
 		fmt.Println("(dry run: nothing is changed)")
+	}
+	if fi, err := os.Stat(root); err == nil && !fi.IsDir() {
+		return fmt.Errorf("not a directory: %s", tildePath(root))
+	} else if err != nil {
+		// Starting from scratch: make a new repository.
+		if err := createRepo(root, dryRun); err != nil || dryRun {
+			return err
+		}
 	}
 
 	if err := registerRoot(root, dryRun); err != nil {
@@ -125,6 +131,22 @@ func initRepo(dir string, paths initPaths, dryRun bool) error {
 	}
 
 	return applyLinks(root, cfg.Links, dryRun)
+}
+
+// createRepo makes an empty git repository at root, after asking.
+func createRepo(root string, dryRun bool) error {
+	fmt.Printf("  create  %s (new git repository)\n", tildePath(root))
+	if dryRun {
+		fmt.Println("(dry run: stopping here; to use an existing repository, pass --from <git url>)")
+		return nil
+	}
+	if !confirm(fmt.Sprintf("%s does not exist. Create a new dotfiles repository there?", tildePath(root))) {
+		return fmt.Errorf("canceled; to use an existing repository: dots init --from <git url>")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	return run(root, "git", "init", "--quiet")
 }
 
 // cloneRepo clones repo into dir, which must not exist or be empty.
