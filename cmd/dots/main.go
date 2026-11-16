@@ -18,6 +18,10 @@ var version = "dev"
 var assumeYes bool
 
 func main() {
+	// Homebrew may be installed but not on PATH yet (its shellenv line not
+	// added, or the shell not restarted); use it anyway.
+	useBrewOffPath()
+
 	root := &cobra.Command{
 		Use:           "dots",
 		Short:         "Manage your dotfiles",

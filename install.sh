@@ -62,9 +62,17 @@ chmod +x "$install_dir/dots.new"
 mv -f "$install_dir/dots.new" "$install_dir/dots"
 echo "Installed $("$install_dir/dots" --version) to $install_dir/dots"
 
+dots="dots"
 case ":$PATH:" in
   *":$install_dir:"*) ;;
-  *) echo "Add $install_dir to PATH, e.g.: export PATH=\"$install_dir:\$PATH\"" ;;
+  *) dots="$install_dir/dots" ;;
 esac
 
-echo "Next: clone your dotfiles to ~/dotfiles and run: dots install"
+cat <<NEXT
+
+Next (Homebrew must be installed: https://brew.sh):
+  New dotfiles:      $dots init && $dots install
+  Your own dotfiles: $dots init --from https://github.com/<you>/dotfiles.git && $dots install
+
+dots install also prints the lines to add to your shell setup (PATH, Homebrew, mise).
+NEXT

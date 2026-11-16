@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// homebrewInstaller is Homebrew's official install command.
+// homebrewInstaller is Homebrew's official install command, shown when it is missing.
 const homebrewInstaller = `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 
 func newInstallCmd() *cobra.Command {
@@ -20,11 +20,12 @@ func newInstallCmd() *cobra.Command {
 		Use:   "install",
 		Short: "Set up this machine: links, Homebrew + Brewfiles, mise tools",
 		Long: `Set up this machine from the dotfiles repository. GUI apps come from
-Homebrew and CLI tools from mise, so both are required:
+Homebrew and CLI tools from mise, so both are required (install Homebrew first):
 
   1. create the symlinks under [links]
-  2. install Homebrew if missing (after asking), then brew bundle the Brewfiles
+  2. brew bundle the Brewfiles
   3. install mise with Homebrew if missing, then mise install
+  4. print any lines your shell setup still needs
 
 Safe to run again.`,
 		Args: cobra.NoArgs,
@@ -62,8 +63,10 @@ func install(r *repo, dryRun bool) error {
 		return err
 	}
 
+	fmt.Println("\n== shell ==")
+	printShellSetup(r)
 	if !dryRun {
-		fmt.Println("\nDone. Restart your shell (exec $SHELL -l) to pick up the changes.")
+		fmt.Println("\nDone. Open a new terminal (or exec $SHELL -l) to pick up the changes.")
 	}
 	return nil
 }
@@ -77,23 +80,11 @@ func installBrew(r *repo, dryRun bool) error {
 	}
 
 	brew := findBrew()
-	if brew == "" && !dryRun {
-		if !confirm("Homebrew is not installed. Install it?") {
-			return errors.New("dots needs Homebrew for GUI apps; install canceled")
-		}
-		if err := run(r.root, "/bin/bash", "-c", homebrewInstaller); err != nil {
-			return err
-		}
-		if brew = findBrew(); brew == "" {
-			return errors.New("Homebrew was installed but brew was not found")
-		}
-	}
 	if brew == "" {
-		fmt.Println("  install Homebrew (asks first)")
-	} else {
-		// Make brew and what it installs (mise, for one) visible to later steps.
-		prependPath(filepath.Dir(brew))
+		return fmt.Errorf("Homebrew is not installed; install it first (https://brew.sh):\n  %s", homebrewInstaller)
 	}
+	// Make brew and what it installs (mise, for one) visible to later steps.
+	prependPath(filepath.Dir(brew))
 
 	// Only install what is missing; upgrades are left to dots upgrade, which asks first.
 	for _, f := range files {
@@ -126,6 +117,17 @@ func installMise(r *repo, dryRun bool) error {
 		return nil
 	}
 	return run(r.root, "env", miseEnv(r), "mise", "install")
+}
+
+// useBrewOffPath puts Homebrew's bin directory on PATH when brew is installed
+// in its usual place but not on PATH, so brew and mise (from Homebrew) work.
+func useBrewOffPath() {
+	if have("brew") {
+		return
+	}
+	if brew := findBrew(); brew != "" {
+		prependPath(filepath.Dir(brew))
+	}
 }
 
 // findBrew returns the brew executable: on PATH, or where the installer puts it.

@@ -1,12 +1,12 @@
 # dotfiles-cli
 
-`dots` keeps a Mac (or Linux) set up from one dotfiles repository: it links your config files into place, installs your apps and tools, and runs your own commands for the repository from anywhere.
+`dots` keeps a Mac set up from one dotfiles repository: it links your config files into place, installs your apps and tools, and runs your own commands for the repository from anywhere.
 
 - **GUI apps** come from **Homebrew** (casks, Mac App Store apps)
 - **CLI tools and runtimes** come from **mise**
 - Formulae that mise does not provide (system tools, libraries) also come from Homebrew
 
-`dots install` sets up both Homebrew and mise for you.
+Install Homebrew yourself first; `dots install` installs mise with it. (On Linux the CLI side works; casks and mas apps are macOS only.)
 
 ## What a dotfiles repository looks like
 
@@ -25,13 +25,19 @@ Plus whatever config files you want to keep (`.zshrc`, editor settings, ...), li
 
 ## Install dots
 
-macOS needs the Command Line Tools first (`xcode-select --install`). Then:
+Before you start:
+
+1. The Command Line Tools: `xcode-select --install`
+2. Homebrew: the one-line installer on [brew.sh](https://brew.sh); run the lines it prints at the end so `brew` is on your PATH
+3. If you will use Mac App Store apps (`mas` lines), sign in to the App Store
+
+Then:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gari8/dotfiles-cli/main/install.sh | sh
 ```
 
-This puts `dots` in `~/.local/bin`. If that is not on your `PATH` yet, use `~/.local/bin/dots` for the commands below. To update `dots` later, run the same line again.
+This puts `dots` in `~/.local/bin`. Until that is on your `PATH`, type `~/.local/bin/dots` instead of `dots`; `dots install` tells you the line to add. To update `dots` later, run the same line again.
 
 ## Getting started
 
@@ -69,6 +75,34 @@ dots install
 ```
 
 `dots install -n` shows what would happen first. See [Use your existing files](#use-your-existing-files) for the details.
+
+### Using someone else's setup
+
+**All of it:** fork their repository on GitHub, then set up from your fork as in [Setting up a new machine](#setting-up-a-new-machine). Delete what you do not want from the Brewfiles and the mise config before `dots install`, which installs everything in them.
+
+**Parts of it:** make your own `~/dotfiles`, copying the files you want from theirs, take the custom commands you want, then install:
+
+```sh
+dots init \
+  --brewfile-gui https://github.com/someone/dotfiles.git//brew/gui.Brewfile \
+  --mise-config https://github.com/someone/dotfiles.git//config/mise/config.toml
+dots pick https://github.com/someone/dotfiles.git commit push   # shown one by one before adding
+dots install
+```
+
+Leave out the flags you do not need (`--brewfile-cli` copies their formulae). Copying replaces an existing file of yours after asking; to take only a few entries, read theirs and `dots add` them one by one.
+
+### Then: your shell
+
+At the end, `dots install` checks your shell startup files and prints any lines still needed so a new terminal finds `dots`, Homebrew and mise, for example:
+
+```
+~/.zprofile    export PATH="$HOME/.local/bin:$PATH"
+~/.zprofile    eval "$(/opt/homebrew/bin/brew shellenv)"
+~/.zshrc       eval "$(mise activate zsh)"
+```
+
+Add them, open a new terminal, and you are done. Keeping those files in your dotfiles ([Keep a config file in the repository](#keep-a-config-file-in-the-repository)) sets up the next machine too.
 
 ## Everyday use
 
@@ -169,14 +203,6 @@ brew "you/tap/opencascade"
 ### Share commands with others
 
 Put commands in a repository (split them with `include` if you like); others take what they want with `dots pick <git url>`, after reading each one.
-
-### Start from someone else's apps
-
-```sh
-dots init --brewfile-gui https://github.com/someone/dotfiles.git//brew/gui.Brewfile
-```
-
-copies their GUI Brewfile into yours; edit it, then `dots install`.
 
 ## Custom commands
 

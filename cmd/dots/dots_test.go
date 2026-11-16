@@ -382,3 +382,44 @@ func TestInitFromReview(t *testing.T) {
 		t.Fatalf("~/.zshrc not linked: %q", dest)
 	}
 }
+
+func TestMissingShellSetup(t *testing.T) {
+	home := "/home/u"
+	files := map[string]string{}
+	read := func(p string) string { return files[p] }
+	brew := "/opt/homebrew/bin/brew"
+	sysPath := []string{"/usr/bin", "/bin"}
+
+	// Nothing set up: all three lines, in the login file and the rc file.
+	got := missingShellSetup(home, "zsh", brew, sysPath, read)
+	want := []shellLine{
+		{"~/.zprofile", `export PATH="$HOME/.local/bin:$PATH"`},
+		{"~/.zprofile", `eval "$(/opt/homebrew/bin/brew shellenv)"`},
+		{"~/.zshrc", `eval "$(mise activate zsh)"`},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	// Lines anywhere in the startup files count, and dirs already on PATH need nothing.
+	files["/home/u/.zshrc"] = "eval \"$(/opt/homebrew/bin/brew shellenv)\"\neval \"$(mise activate zsh)\"\n"
+	got = missingShellSetup(home, "zsh", brew, append(sysPath, "/home/u/.local/bin"), read)
+	if len(got) != 0 {
+		t.Errorf("set up: got %v", got)
+	}
+
+	// Intel Homebrew in /usr/local/bin is on PATH already.
+	got = missingShellSetup(home, "bash", "/usr/local/bin/brew", []string{"/usr/local/bin", "/home/u/.local/bin"}, func(string) string { return "" })
+	if len(got) != 1 || got[0].line != `eval "$(mise activate bash)"` || got[0].file != "~/.bashrc" {
+		t.Errorf("bash: got %v", got)
+	}
+
+	if got := missingShellSetup(home, "tcsh", brew, sysPath, read); got != nil {
+		t.Errorf("unknown shell: got %v", got)
+	}
+}
