@@ -23,6 +23,8 @@ A git repository; `dots init` creates this layout (every path can be changed in 
 
 Plus whatever config files you want to keep (`.zshrc`, editor settings, ...), linked into your home directory by `[links]` in `dots.toml`.
 
+For a real example, see the author's dotfiles: [gari8/dotfiles](https://github.com/gari8/dotfiles).
+
 ## Install dots
 
 Before you start:
@@ -77,6 +79,8 @@ dots install
 `dots install -n` shows what would happen first. See [Use your existing files](RECIPES.md#use-your-existing-files) for the details.
 
 ### Using someone else's setup
+
+Want a starting point? The author's [gari8/dotfiles](https://github.com/gari8/dotfiles) works with any of the options below (replace `someone` with `gari8`).
 
 **All of it:** fork their repository on GitHub, then set up from your fork as in [Setting up a new machine](#setting-up-a-new-machine). Delete what you do not want from the Brewfiles and the mise config before `dots install`, which installs everything in them.
 
