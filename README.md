@@ -109,7 +109,7 @@ dots pick https://github.com/gari8/dotfiles-cli.git//examples/dots.toml status c
 # any git URL works, e.g. git@github.com:gari8/dotfiles-cli.git//examples/dots.toml
 ```
 
-Create an empty repository on GitHub and connect it (once):
+`~/dotfiles` is already a git repository (`dots init` made it one). Create an empty repository on GitHub and connect it (once):
 
 ```sh
 cd ~/dotfiles && git remote add origin git@github.com:you/dotfiles.git

@@ -84,6 +84,15 @@ func initRepo(dir string, paths initPaths, dryRun bool) error {
 		if err := createRepo(root, dryRun); err != nil || dryRun {
 			return err
 		}
+	} else if !succeeds(root, "git", "rev-parse", "--is-inside-work-tree") {
+		// An existing directory that is not under git yet (custom commands
+		// and syncing expect a repository).
+		fmt.Printf("  git     init %s\n", tildePath(root))
+		if !dryRun {
+			if err := run(root, "git", "init", "--quiet"); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := registerRoot(root, dryRun); err != nil {

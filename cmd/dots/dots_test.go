@@ -327,3 +327,25 @@ func TestInclude(t *testing.T) {
 		t.Errorf("missing include: got %v", err)
 	}
 }
+
+func TestInitGitInit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("DOTS_ROOT", "")
+	root := filepath.Join(home, "dotfiles")
+	os.MkdirAll(root, 0o755) // made by hand, not a git repository
+
+	if err := initRepo(root, initPaths{}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		t.Fatal("dry run ran git init")
+	}
+	if err := initRepo(root, initPaths{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		t.Fatal("git init was not run for an existing directory")
+	}
+}
