@@ -423,3 +423,43 @@ func TestMissingShellSetup(t *testing.T) {
 		t.Errorf("unknown shell: got %v", got)
 	}
 }
+
+func TestTidyAndAction(t *testing.T) {
+	vulns := []scanVuln{
+		{id: "B", severity: "High", pkg: "golang.org/x/mod", versions: []string{"v0.14.0"}, fix: "fixed in 0.40.0", fixed: true},
+		{id: "A", severity: "Unknown", pkg: "stdlib", versions: []string{"go1.27.3"}, fix: "fixed in 1.27.4", fixed: true},
+		{id: "B", severity: "High", pkg: "golang.org/x/mod", versions: []string{"v0.19.0"}, fix: "fixed in 0.40.0", fixed: true},
+		{id: "B", severity: "High", pkg: "golang.org/x/mod", versions: []string{"v0.20.0"}, fix: "fixed in 0.40.0", fixed: true},
+		{id: "C", severity: "Critical", pkg: "golang.org/x/net", versions: []string{"v0.57.0"}, fix: "no fix yet"},
+	}
+	got := tidyVulns(vulns)
+	if len(got) != 3 {
+		t.Fatalf("merged = %+v", got)
+	}
+	if got[0].id != "C" || got[1].id != "B" || got[2].id != "A" {
+		t.Errorf("not sorted by severity: %v %v %v", got[0].id, got[1].id, got[2].id)
+	}
+	if l := got[1].pkgLabel(); l != "golang.org/x/mod v0.14.0 … v0.20.0 (3 versions)" {
+		t.Errorf("label = %q", l)
+	}
+
+	latest := scanTool{name: "kubectl"}
+	outdated := scanTool{name: "gh", newer: "2.104.0"}
+	cases := []struct {
+		v      scanVuln
+		t      scanTool
+		kind   string
+		action int
+		todo   string
+	}{
+		{got[1], outdated, "mise", actionUpgrade, "dots upgrade"},
+		{got[1], latest, "mise", actionWait, "wait for a new kubectl release"},
+		{scanVuln{fixed: true}, scanTool{name: "openssl@4"}, "brew", actionWait, "wait for Homebrew to update openssl@4"},
+		{got[0], outdated, "mise", actionNone, ""},
+	}
+	for _, c := range cases {
+		if a, todo := c.v.action(c.t, c.kind); a != c.action || todo != c.todo {
+			t.Errorf("action(%s, %s) = %d %q, want %d %q", c.v.id, c.t.name, a, todo, c.action, c.todo)
+		}
+	}
+}

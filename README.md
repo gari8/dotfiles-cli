@@ -124,13 +124,19 @@ Add them, open a new terminal, and you are done. Keeping those files in your dot
 
 ### Vulnerability scan
 
-`dots scan` lists known vulnerabilities and whether a fixed version is out:
+`dots scan` lists known vulnerabilities and what you can do about each one:
 
 ```
 mise
-  gh 2.103.3  (2.104.0 available: dots upgrade)
-    MEDIUM  GHSA-q7gw-24fr-5p69  go.opentelemetry.io/otel/trace v1.44.0  fixed in 1.47.0
+  gh 2.103.3  (2.104.0 available): dots upgrade
+    MEDIUM    GHSA-q7gw-24fr-5p69  go.opentelemetry.io/otel/trace v1.44.0  fixed in 1.47.0
+  kubectl 1.37.2  (latest): wait for a new kubectl release
+    CRITICAL  GO-2026-6612         golang.org/x/net v0.57.0                fixed in 0.60.0
+
+2 vulnerabilities: 1 fixed by dots upgrade, 1 waiting for a new release of the tool, 0 with no fix yet
 ```
+
+Most findings are in libraries bundled into a tool: "fixed in" is the library's fixed version, which reaches you only when the tool ships a release built with it. So `dots upgrade` helps only where it says so; the rest wait for the tool's authors (or Homebrew).
 
 Brewfile formulae and their dependencies are checked with `brew vulns` (OSV.dev); mise tools with [grype](https://github.com/anchore/grype), run through `mise exec` (the first run downloads its database). Casks and mas apps are not covered. It exits 1 when anything is found.
 

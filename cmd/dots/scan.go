@@ -29,6 +29,9 @@ func newScanCmd() *cobra.Command {
   mise: installed tool versions, with grype (run via mise exec ` + grype + `).
         Findings are usually in libraries bundled into a tool.
 
+Each finding says what to do: "dots upgrade" when a newer version of the
+tool is out, "wait for ..." when the fix exists upstream but the tool (or
+Homebrew) has not shipped it yet, nothing when there is no fix.
 Exits 1 when anything is found.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,13 +87,84 @@ type scanTool struct {
 
 type scanVuln struct {
 	id, severity string
-	pkg          string // vulnerable package inside the tool (mise), or ""
-	fix          string // human-readable fix status
-	fixed        bool   // a released fix exists
+	pkg          string   // vulnerable package inside the tool (mise), or "" for the tool itself
+	versions     []string // versions of pkg found (a library can be bundled several times)
+	fix          string   // human-readable fix status
+	fixed        bool     // a released fix exists
+}
+
+// What can be done about a finding.
+const (
+	actionUpgrade = iota // a newer version of the tool is out: dots upgrade
+	actionWait           // fixed upstream, but the tool (or Homebrew) has not shipped it yet
+	actionNone           // no fix yet
+)
+
+// action is what the user can do about v in tool t (kind is "brew" or "mise").
+func (v scanVuln) action(t scanTool, kind string) (int, string) {
+	switch {
+	case !v.fixed:
+		return actionNone, ""
+	case t.newer != "":
+		return actionUpgrade, "dots upgrade"
+	case kind == "brew":
+		return actionWait, "wait for Homebrew to update " + t.name
+	default:
+		return actionWait, "wait for a new " + t.name + " release"
+	}
+}
+
+var severityRank = map[string]int{"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+
+// tidyVulns merges findings that differ only in the bundled version and
+// sorts them by severity.
+func tidyVulns(vulns []scanVuln) []scanVuln {
+	var out []scanVuln
+	index := map[string]int{}
+	for _, v := range vulns {
+		key := v.id + "\x00" + v.pkg + "\x00" + v.fix
+		if i, ok := index[key]; ok {
+			out[i].versions = append(out[i].versions, v.versions...)
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, v)
+	}
+	rank := func(s string) int {
+		if r, ok := severityRank[strings.ToUpper(s)]; ok {
+			return r
+		}
+		return len(severityRank)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if ri, rj := rank(out[i].severity), rank(out[j].severity); ri != rj {
+			return ri < rj
+		}
+		if out[i].pkg != out[j].pkg {
+			return out[i].pkg < out[j].pkg
+		}
+		return out[i].id < out[j].id
+	})
+	return out
+}
+
+// pkgLabel is the package and its versions, shortened when there are many.
+func (v scanVuln) pkgLabel() string {
+	if v.pkg == "" {
+		return ""
+	}
+	switch n := len(v.versions); {
+	case n == 0:
+		return v.pkg
+	case n <= 2:
+		return v.pkg + " " + strings.Join(v.versions, ", ")
+	default:
+		return fmt.Sprintf("%s %s … %s (%d versions)", v.pkg, v.versions[0], v.versions[n-1], n)
+	}
 }
 
 func printScan(groups []scanGroup) int {
-	total, fixable := 0, 0
+	counts := [3]int{}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	for i, g := range groups {
 		if i > 0 {
@@ -101,17 +175,30 @@ func printScan(groups []scanGroup) int {
 			fmt.Fprintln(w, "  no known vulnerabilities")
 		}
 		for _, t := range g.tools {
-			line := fmt.Sprintf("  %s %s", t.name, t.version)
+			state := "latest"
 			if t.newer != "" {
-				line += fmt.Sprintf("  (%s available: dots upgrade)", t.newer)
+				state = t.newer + " available"
 			}
-			fmt.Fprintln(w, line)
-			for _, v := range t.vulns {
-				fmt.Fprintf(w, "    %s\t%s\t%s\t%s\n", strings.ToUpper(v.severity), v.id, v.pkg, v.fix)
-				total++
-				if v.fixed {
-					fixable++
+			vulns := tidyVulns(t.vulns)
+			// When every finding calls for the same thing, say it once on the tool line.
+			todos := map[string]bool{}
+			for _, v := range vulns {
+				_, todo := v.action(t, g.title)
+				todos[todo] = true
+			}
+			header := fmt.Sprintf("  %s %s  (%s)", t.name, t.version, state)
+			shared := len(todos) == 1
+			if _, todo := vulns[0].action(t, g.title); shared && todo != "" {
+				header += ": " + todo
+			}
+			fmt.Fprintln(w, header)
+			for _, v := range vulns {
+				a, todo := v.action(t, g.title)
+				counts[a]++
+				if shared {
+					todo = ""
 				}
+				fmt.Fprintf(w, "    %s\t%s\t%s\t%s\t%s\n", strings.ToUpper(v.severity), v.id, v.pkgLabel(), v.fix, todo)
 			}
 		}
 		for _, n := range g.notes {
@@ -119,8 +206,13 @@ func printScan(groups []scanGroup) int {
 		}
 	}
 	w.Flush()
+	total := counts[actionUpgrade] + counts[actionWait] + counts[actionNone]
 	if total > 0 {
-		fmt.Printf("\n%d vulnerabilities, %d with a released fix\n", total, fixable)
+		fmt.Printf("\n%d vulnerabilities: %d fixed by dots upgrade, %d waiting for a new release of the tool, %d with no fix yet\n",
+			total, counts[actionUpgrade], counts[actionWait], counts[actionNone])
+		if counts[actionUpgrade] > 0 {
+			fmt.Println("Run dots upgrade, then dots scan again.")
+		}
 	}
 	return total
 }
@@ -296,9 +388,10 @@ func grypeScan(r *repo, dir string) ([]scanVuln, error) {
 		sv := scanVuln{
 			id:       v.ID,
 			severity: orUnknown(v.Severity),
-			pkg:      m.Artifact.Name + " " + m.Artifact.Version,
+			pkg:      m.Artifact.Name,
+			versions: []string{m.Artifact.Version},
 		}
-		if key := sv.id + " " + sv.pkg; seen[key] {
+		if key := sv.id + " " + sv.pkg + " " + m.Artifact.Version; seen[key] {
 			continue
 		} else {
 			seen[key] = true
