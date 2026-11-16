@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"github.com/BurntSushi/toml"
 	"os"
 	"path/filepath"
@@ -347,5 +348,37 @@ func TestInitGitInit(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		t.Fatal("git init was not run for an existing directory")
+	}
+}
+
+func TestInitFromReview(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("DOTS_ROOT", "")
+	root := filepath.Join(home, "dotfiles")
+	writeFile(t, filepath.Join(root, "zsh", ".zshrc"), "# theirs\n")
+	writeFile(t, filepath.Join(root, configFile), "[links]\n\"zsh/.zshrc\" = \"~/.zshrc\"\n")
+	writeFile(t, filepath.Join(home, ".zshrc"), "# mine\n")
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+
+	// Answer no: nothing in the home directory changes.
+	oldStdin := stdin
+	defer func() { stdin = oldStdin }()
+	stdin = bufio.NewReader(strings.NewReader("n\n"))
+	if err := initRepo(root, initPaths{cloned: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, ".zshrc")); string(b) != "# mine\n" {
+		t.Fatalf("~/.zshrc was replaced although the answer was no: %q", b)
+	}
+
+	// Answer yes: linked.
+	stdin = bufio.NewReader(strings.NewReader("y\n"))
+	if err := initRepo(root, initPaths{cloned: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if dest, _ := os.Readlink(filepath.Join(home, ".zshrc")); dest != filepath.Join(root, "zsh", ".zshrc") {
+		t.Fatalf("~/.zshrc not linked: %q", dest)
 	}
 }

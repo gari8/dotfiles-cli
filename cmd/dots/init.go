@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -18,6 +19,10 @@ import (
 // (empty when not given).
 type initPaths struct {
 	brewfileCLI, brewfileGUI, miseConfig string
+
+	// cloned is set by --from: the repository may be someone else's, so its
+	// links are shown and confirmed before they replace files in your home.
+	cloned bool
 }
 
 func newInitCmd() *cobra.Command {
@@ -34,6 +39,8 @@ mise config if they are missing, and create the symlinks listed under [links].
 Safe to run again; existing files are backed up.
 
 --from clones a git repository into the directory first (it must not exist).
+It is meant for your own dotfiles (or your fork): before linking, the files it
+would link and the custom commands it defines are shown, and you are asked.
 
 --brewfile-cli, --brewfile-gui and --mise-config take either
   a local file (relative to the current directory): recorded under [paths]
@@ -53,6 +60,7 @@ Safe to run again; existing files are backed up.
 				if err := cloneRepo(from, dir, dryRun); err != nil || dryRun {
 					return err
 				}
+				paths.cloned = true
 			}
 			return initRepo(dir, paths, dryRun)
 		},
@@ -140,7 +148,41 @@ func initRepo(dir string, paths initPaths, dryRun bool) error {
 		return err
 	}
 
+	if paths.cloned && !dryRun && !reviewClone(root, cfg) {
+		fmt.Println("Links skipped. Read dots.toml, then run dots install when you are ready.")
+		return nil
+	}
 	return applyLinks(root, cfg.Links, dryRun)
+}
+
+// reviewClone shows what a cloned repository would do to this machine and
+// asks before its links replace files in the home directory.
+func reviewClone(root string, cfg repoConfig) bool {
+	if len(cfg.Links) == 0 && len(cfg.Cmd) == 0 {
+		return true
+	}
+	fmt.Println("\nThis repository")
+	if len(cfg.Links) > 0 {
+		fmt.Println("  links these files into your home (what is there now is backed up):")
+		sources := make([]string, 0, len(cfg.Links))
+		for src := range cfg.Links {
+			sources = append(sources, src)
+		}
+		sort.Strings(sources)
+		for _, src := range sources {
+			fmt.Printf("    %s -> %s\n", cfg.Links[src], src)
+		}
+	}
+	if len(cfg.Cmd) > 0 {
+		names := make([]string, 0, len(cfg.Cmd))
+		for name := range cfg.Cmd {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Printf("  defines custom commands (shell scripts; read them in dots.toml before running): %s\n", strings.Join(names, ", "))
+	}
+	fmt.Println("  and dots install will install everything in its Brewfiles and mise config.")
+	return confirm("Create the links now?")
 }
 
 // createRepo makes an empty git repository at root, after asking.

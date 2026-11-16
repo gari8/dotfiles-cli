@@ -1,2 +1,2 @@
 # Bump this to release: pushing a change to main tags v<version> and runs goreleaser.
-version = "0.1.4"
+version = "0.1.5"

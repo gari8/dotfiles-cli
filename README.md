@@ -54,6 +54,8 @@ dots init --from https://github.com/you/dotfiles.git   # clones it to ~/dotfiles
 dots install
 ```
 
+`--from` is for your own dotfiles (or your fork): before linking, dots shows which files it would link and which custom commands the repository defines, and asks. To borrow parts of someone else's setup, see [Recipes](#recipes) instead.
+
 A fresh machine has no SSH key yet, so use the HTTPS URL: a public repository needs no login. For a private one, set up GitHub access first (an SSH key added to GitHub, or `gh auth login`).
 
 ### Moving existing dotfiles to dots
