@@ -12,14 +12,20 @@ import (
 )
 
 func newUpgradeCmd() *cobra.Command {
-	var dryRun bool
+	var dryRun, self bool
 	var exclude []string
 	var t target
 	cmd := &cobra.Command{
-		Use:   "upgrade [--mise|--brew]",
-		Short: "Show available upgrades and apply them after confirmation",
+		Use:   "upgrade [--mise|--brew|--self]",
+		Short: "Show available upgrades (dots itself included) and apply them after confirmation",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if self && !t.all() {
+				return fmt.Errorf("give only one of --mise / --brew / --self")
+			}
+			if self {
+				return upgradeSelf(dryRun)
+			}
 			r, err := openRepo()
 			if err != nil {
 				return err
@@ -35,9 +41,10 @@ func newUpgradeCmd() *cobra.Command {
 					return err
 				}
 			}
-			return upgrade(r, doBrew, doMise, dryRun, exclude)
+			return upgrade(r, doBrew, doMise, t.all(), dryRun, exclude)
 		},
 	}
+	cmd.Flags().BoolVar(&self, "self", false, "dots itself (installed with install.sh)")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "only show what would be upgraded")
 	cmd.Flags().StringSliceVarP(&exclude, "exclude", "x", nil, "tools to leave as they are (comma separated)")
 	addTargetFlags(cmd, &t, false, false)
@@ -49,8 +56,51 @@ type outdatedItem struct {
 	name, current, latest string
 }
 
-func upgrade(r *repo, doBrew, doMise, dryRun bool, exclude []string) error {
-	var brewItems, miseItems []outdatedItem
+// upgradeSelf updates only dots (dots upgrade --self).
+func upgradeSelf(dryRun bool) error {
+	if _, ok := parseVersion(version); !ok {
+		return fmt.Errorf("this dots is a %s build; install a release with install.sh", version)
+	}
+	exe, err := selfPath()
+	if err != nil {
+		return err
+	}
+	latest, err := latestRelease()
+	if err != nil {
+		return err
+	}
+	if !newerVersion(version, latest) {
+		fmt.Printf("dots %s is the latest\n", version)
+		return nil
+	}
+	fmt.Printf("dots %s → %s (%s)\n", version, latest, tildePath(exe))
+	if dryRun {
+		return nil
+	}
+	if !confirm("Upgrade dots?") {
+		return canceled("Upgrade")
+	}
+	return selfUpdate(latest)
+}
+
+// selfOutdated returns dots itself as an upgrade item when a newer release
+// is out and it can update itself; otherwise nil, quietly.
+func selfOutdated() []outdatedItem {
+	if _, ok := parseVersion(version); !ok {
+		return nil
+	}
+	if _, err := selfPath(); err != nil {
+		return nil
+	}
+	latest, err := latestRelease()
+	if err != nil || !newerVersion(version, latest) {
+		return nil
+	}
+	return []outdatedItem{{"dots", version, latest}}
+}
+
+func upgrade(r *repo, doBrew, doMise, doSelf, dryRun bool, exclude []string) error {
+	var brewItems, miseItems, selfItems []outdatedItem
 	var err error
 	if doBrew {
 		// Refresh formula and cask definitions before comparing versions.
@@ -66,16 +116,21 @@ func upgrade(r *repo, doBrew, doMise, dryRun bool, exclude []string) error {
 			return err
 		}
 	}
+	if doSelf {
+		selfItems = selfOutdated()
+	}
 	brewItems = without(brewItems, exclude)
 	miseItems = without(miseItems, exclude)
+	selfItems = without(selfItems, exclude)
 
-	if len(brewItems) == 0 && len(miseItems) == 0 {
+	if len(brewItems) == 0 && len(miseItems) == 0 && len(selfItems) == 0 {
 		fmt.Println("Everything is up to date")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	printOutdated(w, "brew", brewItems)
 	printOutdated(w, "mise", miseItems)
+	printOutdated(w, "dots", selfItems)
 	w.Flush()
 
 	if dryRun {
@@ -93,6 +148,12 @@ func upgrade(r *repo, doBrew, doMise, dryRun bool, exclude []string) error {
 	if len(miseItems) > 0 {
 		args := append([]string{miseEnv(r), "mise", "upgrade", "--global"}, names(miseItems)...)
 		if err := run(r.root, "env", args...); err != nil {
+			return err
+		}
+	}
+	// Last, so a failure here does not stop the other upgrades.
+	if len(selfItems) > 0 {
+		if err := selfUpdate(selfItems[0].latest); err != nil {
 			return err
 		}
 	}

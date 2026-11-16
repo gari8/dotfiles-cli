@@ -1,7 +1,12 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"github.com/BurntSushi/toml"
 	"os"
 	"path/filepath"
@@ -461,5 +466,54 @@ func TestTidyAndAction(t *testing.T) {
 		if a, todo := c.v.action(c.t, c.kind); a != c.action || todo != c.todo {
 			t.Errorf("action(%s, %s) = %d %q, want %d %q", c.v.id, c.t.name, a, todo, c.action, c.todo)
 		}
+	}
+}
+
+func TestVersions(t *testing.T) {
+	cases := []struct {
+		current, latest string
+		newer           bool
+	}{
+		{"0.1.6", "0.1.7", true},
+		{"0.1.7", "0.1.7", false},
+		{"0.2.0", "0.1.9", false},
+		{"0.9.0", "0.10.0", true},
+		{"1.0.0-rc.1", "1.0.0", false}, // suffixes are ignored
+		{"dev", "0.1.7", false},
+	}
+	for _, c := range cases {
+		if got := newerVersion(c.current, c.latest); got != c.newer {
+			t.Errorf("newerVersion(%q, %q) = %v", c.current, c.latest, got)
+		}
+	}
+}
+
+func TestReleaseArchive(t *testing.T) {
+	// A tar.gz like goreleaser's, with dots and a README.
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for name, body := range map[string]string{"README.md": "readme", "dots": "binary"} {
+		tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	gz.Close()
+	data := buf.Bytes()
+
+	sum := sha256.Sum256(data)
+	sums := hex.EncodeToString(sum[:]) + "  dotfiles-cli_0.1.7_darwin_arm64.tar.gz\n"
+	if err := checkSum(data, sums, "dotfiles-cli_0.1.7_darwin_arm64.tar.gz"); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSum(append(data, 0), sums, "dotfiles-cli_0.1.7_darwin_arm64.tar.gz"); err == nil {
+		t.Error("a changed archive passed the checksum")
+	}
+	if err := checkSum(data, sums, "other.tar.gz"); err == nil {
+		t.Error("a missing checksum line passed")
+	}
+	bin, err := extractDots(data)
+	if err != nil || string(bin) != "binary" {
+		t.Errorf("extractDots = %q, %v", bin, err)
 	}
 }
