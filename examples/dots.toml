@@ -1,0 +1,83 @@
+# Example dots.toml: put it at the root of your dotfiles repository.
+version = 1
+
+# Symlinks created by dots init / dots install: "file in this repository" = "link target"
+[links]
+"zsh/.zprofile" = "~/.zprofile"
+"zsh/.zshrc" = "~/.zshrc"
+"config/ghostty" = "~/.config/ghostty"
+"config/mise" = "~/.config/mise"
+
+# [paths] and [brewfile] are left at their defaults (Brewfile,
+# config/mise/config.toml; sections headed "CLI" / "GUI").
+
+# Custom commands: dots cmd <name> [args] (dots cmd list to see them)
+#   run:     shell command. A one-line command that does not use $1, "$@" etc.
+#            gets the arguments appended; otherwise place them yourself.
+#   desc:    shown by dots cmd list
+#   dir:     working directory: root (this repository, default) or cwd
+#   confirm: ask before running (skipped with -y)
+# $DOTS_ROOT is this repository and $DOTS_PWD is where dots was run.
+# list / ls / add / rm / remove are reserved names.
+
+[cmd.status]
+desc = "Show uncommitted changes and unpushed commits"
+run = '''
+git status -sb
+if git rev-parse @{u} >/dev/null 2>&1; then
+  c=$(git log --oneline @{u}..HEAD)
+  if [ -n "$c" ]; then printf '\nUnpushed:\n%s\n' "$c"; fi
+fi
+'''
+
+[cmd.commit]
+desc = "Review the diff and commit everything (dots cmd commit <message>)"
+run = '''
+if [ $# -eq 0 ]; then echo "usage: dots cmd commit <message>" >&2; exit 1; fi
+if [ -z "$(git status --porcelain)" ]; then echo "No changes"; exit 0; fi
+git status --short
+git diff
+printf 'Commit these changes? [y/N] '; read a
+case "$a" in y|Y|yes) ;; *) echo "Commit canceled"; exit 1 ;; esac
+git add -A && git commit -m "$*"
+'''
+
+[cmd.push]
+desc = "Review unpushed commits and push"
+run = '''
+st=$(git status --short)
+if [ -n "$st" ]; then printf 'Uncommitted changes (not pushed):\n%s\n' "$st"; fi
+if ! git rev-parse @{u} >/dev/null 2>&1; then
+  printf 'No upstream. Push to origin? [y/N] '; read a
+  case "$a" in y|Y|yes) exec git push -u origin HEAD ;; *) echo "Push canceled"; exit 1 ;; esac
+fi
+c=$(git log --oneline @{u}..HEAD)
+if [ -z "$c" ]; then echo "Nothing to push"; exit 0; fi
+echo "$c"
+printf 'Push these commits? [y/N] '; read a
+case "$a" in y|Y|yes) exec git push ;; *) echo "Push canceled"; exit 1 ;; esac
+'''
+
+[cmd.pull]
+desc = "Pull remote changes (apply them with dots install)"
+run = '''
+before=$(git rev-parse HEAD)
+git pull --ff-only || exit
+if [ "$before" != "$(git rev-parse HEAD)" ]; then printf '\nRun dots install to apply them\n'; fi
+'''
+
+[cmd.sync]
+desc = "Pull, then run dots install"
+run = '''
+git pull --ff-only || exit
+echo
+exec dots install
+'''
+
+[cmd.diff]
+desc = "Show the diff"
+run = "git diff"
+
+[cmd.log]
+desc = "Show recent commits"
+run = "git log --oneline -10"

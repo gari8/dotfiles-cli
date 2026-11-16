@@ -59,7 +59,13 @@ func newAddCmd() *cobra.Command {
 				if comment != "" {
 					return fmt.Errorf("-m works only with --brew / --cask")
 				}
+				if err := requireTool("mise"); err != nil {
+					return err
+				}
 				return miseEdit(r, "use", args)
+			}
+			if err := requireTool("brew"); err != nil {
+				return err
 			}
 			return brewAdd(r, kindOf(t.cask), args, comment)
 		},
@@ -82,7 +88,13 @@ func newRmCmd() *cobra.Command {
 				return err
 			}
 			if t.mise {
+				if err := requireTool("mise"); err != nil {
+					return err
+				}
 				return miseEdit(r, "unuse", args)
+			}
+			if err := requireTool("brew"); err != nil {
+				return err
 			}
 			return brewRemove(r, kindOf(t.cask), args)
 		},

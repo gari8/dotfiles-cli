@@ -128,6 +128,12 @@ func TestInitAndLinks(t *testing.T) {
 	if got, _ := repoRoot(); got != root {
 		t.Fatalf("root not registered: %q", got)
 	}
+	if _, err := os.Stat(filepath.Join(root, "Brewfile")); err != nil {
+		t.Error("Brewfile was not created")
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "config", "mise", "config.toml")); string(b) != "[tools]\n" {
+		t.Errorf("an existing mise config was overwritten: %q", b)
+	}
 
 	// Add links and run again.
 	writeFile(t, filepath.Join(root, configFile), `[links]

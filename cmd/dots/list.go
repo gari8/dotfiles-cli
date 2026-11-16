@@ -66,6 +66,9 @@ func printGroup(w *tabwriter.Writer, indent, title string, items []listItem) {
 }
 
 func listMise(w *tabwriter.Writer, r *repo) error {
+	if err := ready("mise", r.miseConfig()); err != nil {
+		return err
+	}
 	out, err := output(r.root, "env", miseEnv(r), "mise", "ls", "--global", "--json")
 	if err != nil {
 		return err
@@ -90,8 +93,10 @@ func listMise(w *tabwriter.Writer, r *repo) error {
 			items = append(items, listItem{name: name, note: v.Version, installed: v.Installed})
 		}
 	}
-	printGroup(w, "", "mise", items)
-	fmt.Fprintln(w)
+	if len(items) > 0 {
+		printGroup(w, "", "mise", items)
+		fmt.Fprintln(w)
+	}
 	return nil
 }
 
@@ -102,6 +107,9 @@ var (
 )
 
 func listBrew(w *tabwriter.Writer, r *repo) error {
+	if err := ready("brew", r.brewfile()); err != nil {
+		return err
+	}
 	lines, err := readLines(r.brewfile())
 	if err != nil {
 		return err
@@ -130,6 +138,15 @@ func listBrew(w *tabwriter.Writer, r *repo) error {
 	printGroup(w, "  ", "cask", groups["cask"])
 	printGroup(w, "  ", "mas", groups["mas"])
 	return nil
+}
+
+// ready checks that a manager (brew / mise) is installed and its config file
+// exists; both are required.
+func ready(tool, config string) error {
+	if !exists(config) {
+		return fmt.Errorf("not found: %s (dots init creates it)", tildePath(config))
+	}
+	return requireTool(tool)
 }
 
 // installedSet collects column col of each output line (empty if the command fails).

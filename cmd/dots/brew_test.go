@@ -42,6 +42,17 @@ mas "Xcode", id: 497799835`
 	}
 }
 
+func TestBrewfileTemplateSections(t *testing.T) {
+	cfg := defaultConfig().Brewfile
+	lines := strings.Split(strings.TrimRight(brewfileTemplate(cfg), "\n"), "\n")
+	lines = insertIntoSection(lines, formula.section(cfg), `brew "tree"`)
+	lines = insertIntoSection(lines, cask.section(cfg), `cask "arc"`)
+	got := strings.Join(lines, "\n")
+	if !strings.Contains(got, "# --- CLI ---\nbrew \"tree\"\n") || !strings.HasSuffix(got, "# --- GUI ---\ncask \"arc\"") {
+		t.Errorf("entries are not under their sections:\n%s", got)
+	}
+}
+
 func TestInsertIntoSectionMissing(t *testing.T) {
 	for _, key := range []string{"GUI", ""} {
 		lines := insertIntoSection([]string{`brew "git"`}, key, `cask "arc"`)

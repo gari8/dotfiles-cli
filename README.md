@@ -1,36 +1,29 @@
 # dotfiles-cli
 
-`dots` manages a dotfiles repository from anywhere: symlinks, Homebrew and mise tools, and your own commands.
+`dots` manages a dotfiles repository from anywhere: symlinks, tools, and your own commands.
 
-## Install
+GUI apps come from **Homebrew** (Brewfile) and CLI tools and runtimes from **mise**, so `dots` needs both; `dots install` sets them up.
 
-With [mise](https://mise.jdx.dev):
-
-```sh
-mise use -g github:gari8/dotfiles-cli
-```
-
-Or download a binary from [Releases](https://github.com/gari8/dotfiles-cli/releases), or `go install github.com/gari8/dotfiles-cli/cmd/dots@latest`.
-
-## Setup
+## Set up a new machine
 
 ```sh
-cd ~/dotfiles
-dots init        # registers this directory, creates dots.toml, links [links]
+git clone <your dotfiles> ~/dotfiles
+curl -fsSL https://raw.githubusercontent.com/gari8/dotfiles-cli/main/install.sh | sh
+~/.local/bin/dots install
 ```
 
-Shell completion (zsh):
+`dots install` creates the symlinks under `[links]`, installs Homebrew if needed (after asking) and runs `brew bundle`, installs mise with Homebrew if needed and runs `mise install`. Safe to run again.
 
-```sh
-source <(dots completion zsh)
-```
+Other ways to install `dots`: `mise use -g github:gari8/dotfiles-cli`, `go install github.com/gari8/dotfiles-cli/cmd/dots@latest`, or [Releases](https://github.com/gari8/dotfiles-cli/releases). `install.sh` takes `DOTS_VERSION` and `DOTS_INSTALL_DIR`.
+
+Starting from scratch or outside `~/dotfiles`? `dots init [dir]` creates `dots.toml`, a Brewfile and a mise config. Shell completion (zsh): `source <(dots completion zsh)`.
 
 ## Commands
 
 | Command | Does |
 | --- | --- |
-| `dots init [dir]` | Register the repository, create `dots.toml`, create symlinks (`-n` to preview) |
-| `dots install` | Run the setup script (`paths.install`) |
+| `dots install` | Links, Homebrew + `brew bundle`, `mise install` (`-n` to preview) |
+| `dots init [dir]` | Register the repository (default `~/dotfiles`), create missing config files, create symlinks |
 | `dots add --mise\|--brew\|--cask <name>` | Install and add to the mise config / Brewfile |
 | `dots rm --mise\|--brew\|--cask <name>` | Remove from the config (asks before uninstalling) |
 | `dots list [--mise\|--brew]` | Show managed tools and whether they are installed |
@@ -44,7 +37,7 @@ The repository is found from `$DOTS_ROOT`, then `root` in `~/.config/dots/config
 
 ## dots.toml
 
-At the root of the dotfiles repository. Everything is optional.
+At the root of the dotfiles repository. Everything is optional. See [examples/dots.toml](examples/dots.toml) for a full example with git commands.
 
 ```toml
 version = 1
@@ -52,7 +45,6 @@ version = 1
 [paths]                      # relative to the repository
 brewfile = "Brewfile"
 mise_config = "config/mise/config.toml"
-install = "scripts/install.sh"
 
 [brewfile]                   # dots add puts entries under the matching "# --- ... ---" heading
 formula_section = "CLI"

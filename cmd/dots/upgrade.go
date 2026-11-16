@@ -24,7 +24,18 @@ func newUpgradeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return upgrade(r, t.all() || t.brew, t.all() || t.mise, dryRun, exclude)
+			doBrew, doMise := t.all() || t.brew, t.all() || t.mise
+			if doBrew {
+				if err := ready("brew", r.brewfile()); err != nil {
+					return err
+				}
+			}
+			if doMise {
+				if err := ready("mise", r.miseConfig()); err != nil {
+					return err
+				}
+			}
+			return upgrade(r, doBrew, doMise, dryRun, exclude)
 		},
 	}
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "only show what would be upgraded")

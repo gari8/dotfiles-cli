@@ -29,7 +29,6 @@ type repoConfig struct {
 type pathsConfig struct {
 	Brewfile   string `toml:"brewfile"`
 	MiseConfig string `toml:"mise_config"`
-	Install    string `toml:"install"`
 }
 
 type brewfileConfig struct {
@@ -45,7 +44,6 @@ func defaultConfig() repoConfig {
 		Paths: pathsConfig{
 			Brewfile:   "Brewfile",
 			MiseConfig: "config/mise/config.toml",
-			Install:    "scripts/install.sh",
 		},
 		Brewfile: brewfileConfig{
 			FormulaSection: "CLI",

@@ -16,13 +16,14 @@ func newInitCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "init [<dotfiles dir>]",
-		Short: "Register the dotfiles repository, create dots.toml and link files",
-		Long: `Register the dotfiles repository (default: the current directory) in
-~/.config/dots/config.toml, create dots.toml if it is missing, and create the
-symlinks listed under [links]. Safe to run again; existing files are backed up.`,
+		Short: "Register the dotfiles repository, create missing config files and link files",
+		Long: `Register the dotfiles repository (default: ~/dotfiles) in
+~/.config/dots/config.toml, create dots.toml, the Brewfile and the mise config
+if they are missing, and create the symlinks listed under [links].
+Safe to run again; existing files are backed up.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir := "."
+			dir := "~/dotfiles"
 			if len(args) == 1 {
 				dir = args[0]
 			}
@@ -43,7 +44,7 @@ func initRepo(dir string, dryRun bool) error {
 		return err
 	}
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
-		return fmt.Errorf("not a directory: %s", tildePath(root))
+		return fmt.Errorf("not a directory: %s (clone your dotfiles there, or pass the path)", tildePath(root))
 	}
 	if dryRun {
 		fmt.Println("(dry run: nothing is changed)")
@@ -54,22 +55,57 @@ func initRepo(dir string, dryRun bool) error {
 	}
 
 	// Create dots.toml from the template, or check the existing one.
-	cfgPath := filepath.Join(root, configFile)
-	if _, err := os.Stat(cfgPath); errors.Is(err, fs.ErrNotExist) {
-		fmt.Printf("  create  %s\n", tildePath(cfgPath))
-		if !dryRun {
-			if err := os.WriteFile(cfgPath, []byte(configTemplate), 0o644); err != nil {
-				return err
-			}
-		}
+	if err := createIfMissing(filepath.Join(root, configFile), configTemplate, dryRun); err != nil {
+		return err
 	}
 	cfg, err := loadConfig(root)
 	if err != nil {
 		return err
 	}
 
+	// GUI apps come from Homebrew and CLI tools from mise, so both files are needed.
+	r := &repo{root: root, cfg: cfg}
+	if err := createIfMissing(r.brewfile(), brewfileTemplate(cfg.Brewfile), dryRun); err != nil {
+		return err
+	}
+	if err := createIfMissing(r.miseConfig(), miseTemplate, dryRun); err != nil {
+		return err
+	}
+
 	return applyLinks(root, cfg.Links, dryRun)
 }
+
+// createIfMissing writes content to path unless the file already exists.
+func createIfMissing(path, content string, dryRun bool) error {
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	fmt.Printf("  create  %s\n", tildePath(path))
+	if dryRun {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// brewfileTemplate has the sections that dots add puts new entries under.
+func brewfileTemplate(cfg brewfileConfig) string {
+	return fmt.Sprintf(`# Homebrew: GUI apps (cask) and system tools that mise does not provide (brew).
+# Edited by dots add --brew / --cask, applied by dots install.
+
+# --- %s ---
+
+# --- %s ---
+`, cfg.FormulaSection, cfg.CaskSection)
+}
+
+// miseTemplate is the mise config that dots init creates.
+const miseTemplate = `# mise: CLI tools and language runtimes.
+# Edited by dots add --mise, applied by dots install.
+[tools]
+`
 
 // registerRoot writes root to the user config, asking before replacing a
 // different one.
@@ -117,7 +153,6 @@ version = 1
 [paths]
 brewfile = "Brewfile"
 mise_config = "config/mise/config.toml"
-install = "scripts/install.sh"
 
 # dots add puts new Brewfile entries at the end of the section whose heading
 # ("# --- ... ---") contains this text; without a match they go at the end.
@@ -125,7 +160,7 @@ install = "scripts/install.sh"
 formula_section = "CLI"
 cask_section = "GUI"
 
-# Symlinks created by dots init: "file in this repository" = "link target".
+# Symlinks created by dots init / dots install: "file in this repository" = "link target".
 [links]
 # "zsh/.zshrc" = "~/.zshrc"
 # "config/mise" = "~/.config/mise"
